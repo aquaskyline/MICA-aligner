@@ -1,11 +1,10 @@
 mica - README
-Version 0.1.288
 ==================
 
 Introduction
 ------------
-mica - is a pair-end short read alignment software based on the SOAP2/2BWT index.
-The mica contains majority of the features in SOAP2-DP.
+mica - is a pair-end short read alignment software based on the SOAP3/2BWT index.
+The mica contains majority of the features in SOAP3-DP.
 * Backward compatiblity with SOAP3-dp index.
 * Bi-directional BWT aided alignment to achieve high speed alignment.
 * Dynamics Programming Enhancement to enhance sensitivity.
@@ -65,9 +64,9 @@ obtained the software archive.
 Upgrade Instruction
 -------------------
 Upgrading into this version of software requires the following actions:
- - 22/12/2013 Though MICA and SOAP2/3-dp in theory supports the same set of index,
+ - 22/12/2013 Though MICA and SOAP3/3-dp in theory supports the same set of index,
     it's recommended the index to be re-built for MICA as various bug fixes in translation
-    table has been implemented since September 2012. If your index was built with SOAP2-DP 
+    table has been implemented since September 2012. If your index was built with SOAP3-DP 
     revision earlier than 218, to take advantage of the correct chromosome
     lengths in SAM output, the translation index needs to be re-built. To do that,
     one may set all construction step to N, except ParseFASTA remains as Y, in
