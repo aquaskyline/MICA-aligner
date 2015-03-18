@@ -1,0 +1,199 @@
+mica - README
+Version 0.1.288
+==================
+
+Introduction
+------------
+mica - is a pair-end short read alignment software based on the SOAP2/2BWT index.
+The mica contains majority of the features in SOAP2-DP.
+* Backward compatiblity with SOAP3-dp index.
+* Bi-directional BWT aided alignment to achieve high speed alignment.
+* Dynamics Programming Enhancement to enhance sensitivity.
+* Pipelining of I/O process
+* Multiple input supported
+Furthermore, multi-MIC is also supported in mica to make full use of the 
+multiple MIC processor available to speed up the alignment process.
+
+The alignment software in this package handles reference sequences in the commonly 
+known FASTA format and short reads in FASTA/FASTQ format (in uncompressed or GZIP format).
+
+The alignment output is in SAM/BAM format.
+
+mica normally operates with 32 GB main memory for a single MIC setting. 
+Memory requirement could go up in case of multiple-MIC settings. For example,
+mica could use up to 64 GB for 3 MIC settings.
+
+
+Citation:
+""MICA: A fast short-read aligner that takes full advantage of Intel® Many Integrated Core Architecture (MIC)", (in press)
+
+Hardware Requirement
+--------------------
+Recommended system requirement
+- A quad core CPU
+- 1+ Co-Processor Intel® Many Integrated Core Architecture
+- Necessary dynamic libraries searchable in environment setting: "LD_LIBRARY_PATH"
+- 32GB main memory
+- 64-bit environment
+
+
+Installation and Configuration
+------------------------------
+mica can be downloaded from this website : http://www.cs.hku.hk/2bwt-tools/
+
+Follow the following steps to install the software after you have 
+obtained the software archive.
+
+1. Move the archive to the directory you wish to install it.
+
+2. Unzip the archive with gunzip and tar
+    % tar -xvvf mica-<version>-x86-64.tar.gz
+    % cd mica-<version>
+
+3. Inside the archive you should find 6 files extracted.
+   They are:
+   Index building software:                     build-index.sh
+                                                index-builder-step1
+                                                index-builder-tep1.ini
+                                                index-builder-step2
+                                                index-builder-step2.ini
+   Alignment software:                          mica
+   Aligner:                                     mica-pe mica-pe.ini
+
+4. For the usages of these software please refer to the next section.
+
+Upgrade Instruction
+-------------------
+Upgrading into this version of software requires the following actions:
+ - 22/12/2013 Though MICA and SOAP2/3-dp in theory supports the same set of index,
+    it's recommended the index to be re-built for MICA as various bug fixes in translation
+    table has been implemented since September 2012. If your index was built with SOAP2-DP 
+    revision earlier than 218, to take advantage of the correct chromosome
+    lengths in SAM output, the translation index needs to be re-built. To do that,
+    one may set all construction step to N, except ParseFASTA remains as Y, in
+    soap2-dp-builder.ini and re-run soap2-dp-builder against the reference sequence.
+
+Software Usage Guide - Index Builder
+----------------------------------------------
+Index builder is the essential first step to preprocess a reference
+sequence (FASTA format) for the alignment software. It
+generates a 2BWT Index.
+
+    > Limitations
+    -------------
+    Please take note of the following restriction on the index builder
+    1.  Builder assumes the input is a well formatted FASTA file.
+    2.  There can be multiple sequences within the FASTA file; however,
+        the total length of the reference sequences cannot exceed 2^32 - 1.
+    3.  No more than 254 sequences in the FASTA file.
+    4.  Characters other than A, C, G and T will be considered invalid characters.
+        Any segment of more than 10 consecutive invalid characters will be removed.
+        All the rest of the invalid characters will be replaced by "G".
+
+To invoke the builder, follow the step:
+
+    % ./soap2-dp-builder <FASTA sequence file>
+
+E.g.,
+    % ./soap2-dp-builder hg19.fa
+
+In this example, mica-index-builder-step1 will build up a 2BWT index for the sequence 
+"hg19.fa". The output index will be "hg19.fa.index.*". mica-index-builder-step2 will
+in addition build up a 1/8 sampled suffix array (SA) for MIC, suffixing ".sa8".
+There should be 17 files with the same prefix created.
+
+Software Usage Guide - Pair-End Alignment
+----------------------------------------------------
+The alignment software takes in the 2BWT index and two FASTA/FASTQ
+file contains equal number of short reads for pair-end alignment.
+There are several options to control the alignment process.
+
+    > Limitations
+    -------------
+    1.  It finds alignment with up to 5 mismatches single character.
+    2.  It supports reads of any length between 20-200.
+    3.  It supports reads contains only A, C, G, T.
+
+Please invoke the alignment software as follows:
+
+    % ./mica pair <index>.index <FASTA/FASTQ read file 1> <FASTA/FASTQ read file 2>  -v <insert size lower limit> -u <insert size upper limit> [option] ...
+    OR
+    % ./mica pair <index>.index -i <Input List File> [option] ...
+
+<index> is the filename of the FASTA reference sequence file you built the index on
+<FASTA/FASTQ read file 1/2> is the filenames of the short reads in FASTA/FASTQ format
+
+    [Mandatory]
+        -v: Lower bound;
+        -u: Upper bound of the insertion size between a pair.
+        A pair will be reported if the insertion size falls
+        between [v,u] and their strands match.
+
+    [Options]
+        -i: Input List File is a plain text file that contains a list of input for the aligner.
+            Following format is expected:
+            <FASTA/FASTQ read file 1> <FASTA/FASTQ read file 2> <insert size lower limit> <insert size upper limit>
+            <FASTA/FASTQ read file 1> <FASTA/FASTQ read file 2> <insert size lower limit> <insert size upper limit>
+            ...
+            Fields are expected to be delimited by space or tab.
+        -m: Maximum #mismatch allowed. [1-5;Default=2]
+        -h: Alignment type. [Default=2]
+            1 : All Valid Pair-end Alignment
+            2 : All Best Pair-end Alignment
+        -b: Output format. [Default=2]
+            2 : SAM 1.4 (Plain)
+            3 : BAM 1.4 (Binary)
+
+
+Examples:
+
+    % ./mica pair ncbi.genome.fa.index reads_A.fa reads_B.fa -m 4 -h 1 -v 0 -u 1000
+In this example, it will report all-valid pair-end alignment of reads_A.fa 
+nd reads_B.fa with at most 4-mismatch; tolerating insertion size of [0,1000].
+
+    > Multi-MIC Support
+    -------------------------
+    mica supports utilising multiple MIC co-processor to speed up the 
+    alignment process. Inside the source code of MICA-PE.c, a compile-time
+    configurable items controls the maximum number of MIC cards equipped on the target
+    machine. This can be updated to reflect the number of MIC coprocessors on the systems.
+        
+        // -----------------------------
+        // Compile-time Configurable #2
+        // -----------------------------
+        // Number of MIC card equipped in the machine.
+        // User may set the numOfMICThread to 0 in mica-pe.ini to disable
+        // a particular MIC card.
+        #define NUM_MIC_EQUIPPED            3
+    
+    NOTE: RECOMPILATION OF THE BINARY IS REQUIRED AFTER THE ABOVE CHANGE.
+
+    Apart from the number of MIC hardware equiped, mica allows user to control
+    how many thread to be spawn within each MIC cards. It's controlled by the runtime ini
+    configuration. Inside mica-pe.ini, 
+    the parameter NumOfMICThreads_x controls the number MIC threads to be spawn on MIC#x.
+
+        [MultipleThreading]
+        # Number of MIC threads to be used by the MICA
+        NumOfMICThreads   = 224;
+        NumOfMICThreads_1 = 224;
+        NumOfMICThreads_2 = 224;
+        ...
+        NumOfMICThreads_n = 224;
+
+    By setting this value to k, MICA will configure OpenMP to spawn k threads on the MIC co-processor
+    to perform alignment. If k = 0, the corresponding MIC co-processor will be
+    disabled and not used.
+
+
+Output Format
+----------------------------------------------
+mica supports output into SAM/BAM v1.4 format.
+
+SAM v1.4 by SAM-tools
+----------------------
+SAM-tools v0.1.19 is included in mica package to faciliate outputting alignment result 
+into SAM output format. We have slightly modified the original code of SAM-tools to make it 
+compilable under icc. Please see http://samtools.sourceforge.net/ for more detail of this package.
+Also read Multi-threading section for detail of the output files.
+

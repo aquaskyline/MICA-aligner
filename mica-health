@@ -1,0 +1,407 @@
+#!/bin/sh
+# the next line restarts using tclsh \
+exec tclsh "$0" "$@"
+
+#
+# Modification History
+#
+# Date    : 2nd February
+# Author  : Edward Wu
+# Changes : New file
+#
+
+set g(MIC_BIN) "/opt/intel/mic/bin/"
+
+set g(DEVICE_TEMPERATURE_WARNING) 75
+set g(DEVICE_TEMPERATURE_ERROR)   90
+
+set g(DEVICE_MEMORY_WARNING)      10
+set g(DEVICE_MEMORY_ERROR)        20
+
+set g(DEVICE_THREAD_PER_CORE)     4
+
+proc Split { line { delimitor " " } } {
+    set retVal [list]
+    
+    foreach field [split $line $delimitor] {
+        set field [string trim $field]
+        if { $field != "" } {
+            lappend retVal $field
+        }
+    }
+    
+    return $retVal
+}
+
+proc GetDeviceList { _devInfo } {
+    upvar $_devInfo devInfo
+    
+    global g
+    
+    set retVal 1
+    
+    set cmd [list $g(MIC_BIN)micinfo -listdevice]
+    set keyIdx 0
+    
+    if { [catch "exec $cmd" op] } {
+        puts "ERROR - Unknown to invoke command $cmd"
+        set retVal 0
+    } else {
+        set i 0
+        foreach line [split $op "\n"] {
+            if { $i == 1 } {
+                if { [string trim $line] != "" } {
+                    set headerFields [Split $line "|"]
+                    set idx [lsearch $headerFields "deviceId"]
+                    if { $idx < 0 } {
+                        puts "ERROR - Cannot find deviceId field as key"
+                        set keyIdx $idx
+                        set retVal 0
+                    }
+                    set i 2
+                }
+            } elseif { $i == 2 } {
+                if { ![regexp -- {^[-|]+$} $line] } {
+                    set bodyFields [Split $line "|"]
+                    set key [lindex $bodyFields $keyIdx]
+                    set devInfo($key,KEY) $key
+                    set devInfo($key,DID) mic$key
+                    set idx 0
+                    foreach field $headerFields {
+                        set devInfo($key,$field) [lindex $bodyFields $idx]
+                        incr idx
+                    }
+                }
+            } elseif { [regexp -- {^List of Available Device.+$} $line] } {
+                set i 1
+            }
+        }
+    }
+    
+    return $retVal
+}
+
+proc PopulateDeviceMemory { _devInfo } {
+    upvar $_devInfo devInfo
+
+    global g
+    
+    set retVal 1
+
+    set cmd [list $g(MIC_BIN)micsmc -m]
+
+    if { [catch "exec $cmd" op] } {
+        puts "ERROR - Unknown to invoke command $cmd"
+        set retVal 0
+    } else {
+        set i -1
+        foreach line [split $op "\n"] {
+            if { [regexp -- "^mic(\[0-9\]+) .mem.:$" $line -> deviceId] } {
+                set i $deviceId
+            } 
+
+            if { $i >= 0 } {
+                if { [regexp -- {^[ \t]+([A-Za-z ]+): [.]+ ([0-9]+.[0-9]+) ([A-Z]+)$} \
+                        $line -> tag number unit] } {
+                    set key $deviceId
+                    set devInfo($key,mem,$tag) "$number"
+                    set devInfo($key,mem-unit,$tag) "$unit"
+                    
+                    if { $unit != "MB" } {
+                        puts "Invalid unit $unit.\n\
+                           Script was not written to cater for this output\n\
+                           $op"
+                        set retVal 0
+                    }
+                }
+            }
+        }
+    }
+    
+    return $retVal
+}
+
+proc PopulateDeviceTemperature { _devInfo } {
+    upvar $_devInfo devInfo
+
+    global g
+    
+    set retVal 1
+
+    set cmd [list $g(MIC_BIN)micsmc -t]
+
+    if { [catch "exec $cmd" op] } {
+        puts "ERROR - Unknown to invoke command $cmd"
+        set retVal 0
+    } else {
+        set i -1
+        foreach line [split $op "\n"] {
+            if { [regexp -- "^mic(\[0-9\]+) .temp.:$" $line -> deviceId] } {
+                set i $deviceId
+            } 
+
+            if { $i >= 0 } {
+                if { [regexp -- {^[ \t]+([A-Za-z ]+): [.]+ ([0-9]+.[0-9]+) ([A-Z]+)$} \
+                        $line -> tag number unit] } {
+                    set key $deviceId
+                    set devInfo($key,temp,$tag) "$number"
+                    set devInfo($key,temp-unit,$tag) "$unit"
+                    
+                    if { $unit != "C" } {
+                        puts "Invalid unit $unit.\n\
+                           Script was not written to cater for this output\n\
+                           $op"
+                        set retVal 0
+                    }
+                }
+            }
+        }
+    }
+    
+    return $retVal
+}
+
+
+proc PopulateDeviceInfo { _devInfo } {
+    upvar $_devInfo devInfo
+
+    global g
+    
+    set retVal 1
+
+    set cmd [list $g(MIC_BIN)micsmc -i]
+
+    if { [catch "exec $cmd" op] } {
+        puts "ERROR - Unknown to invoke command $cmd"
+        set retVal 0
+    } else {
+        set i -1
+        foreach line [split $op "\n"] {
+            if { [regexp -- "^mic(\[0-9\]+) .info.:$" $line -> deviceId] } {
+                set i $deviceId
+            } 
+
+            if { $i >= 0 } {
+                if { [regexp -- {^[ \t]+([A-Za-z ]+): [.]+ (.+)$} \
+                        $line -> tag value] } {
+                    set key $deviceId
+                    set devInfo($key,info,$tag) "$value"\
+                }
+            }
+        }
+    }
+    
+    return $retVal
+}
+
+proc CheckTemperature { _devInfo } {
+    upvar $_devInfo devInfo
+
+    global g
+    
+    set retVal 1
+
+    puts "Performing temperature check."
+    foreach key [lsort -dictionary [array names devInfo "*,KEY"]] {
+        set key $devInfo($key)
+        
+        set cpuTempKey "$key,temp,Cpu Temp"
+        set cpuTempUnitKey "$key,temp-unit,Cpu Temp"
+    
+        if { [info exists devInfo($cpuTempKey)] && [info exists devInfo($cpuTempUnitKey)] } {
+            set tempValue $devInfo($cpuTempKey)
+            set tempUnit $devInfo($cpuTempUnitKey)
+            if { $tempValue > $g(DEVICE_TEMPERATURE_ERROR) } {
+                set retVal 0
+                puts "ERROR - Device #$devInfo($key,deviceId) CPU temperature\
+                    is at $tempValue$tempUnit exceeding $g(DEVICE_TEMPERATURE_ERROR)"
+            } elseif { $tempValue > $g(DEVICE_TEMPERATURE_WARNING) } {
+                set retVal 0
+                puts "WARNING - Device #$devInfo($key,deviceId) CPU temperature\
+                    is at $tempValue$tempUnit exceeding $g(DEVICE_TEMPERATURE_WARNING)"
+            } else {
+                puts "OK - Device #$devInfo($key,deviceId) CPU temperature\
+                    is at $tempValue$tempUnit."
+            }
+        } else {
+            set retVal 0
+            puts "ERROR - Unable to obtain temperature information for deviceId $devInfo($key,deviceId)"
+        }
+        
+    }
+    
+    puts ""
+    
+    return $retVal
+    
+}
+
+
+proc CheckMemory { _devInfo } {
+    upvar $_devInfo devInfo
+
+    global g
+    
+    set retVal 1
+
+    puts "Performing memory check."
+    foreach key [lsort -dictionary [array names devInfo "*,KEY"]] {
+        set key $devInfo($key)
+        
+        set usageKey "$key,mem,Memory Usage"
+        set totalKey "$key,mem,Total Memory"
+        set usageUnitKey "$key,mem-unit,Memory Usage"
+        set totalUnitKey "$key,mem-unit,Total Memory"
+        
+        if { [info exists devInfo($usageKey)] && [info exists devInfo($totalKey)] &&
+              [info exists devInfo($usageUnitKey)] && [info exists devInfo($totalUnitKey)]} {
+        
+            set usage $devInfo($usageKey)
+            set total $devInfo($totalKey)
+            set usageUnit $devInfo($usageUnitKey)
+            set totalUnit $devInfo($totalUnitKey)
+            
+            set percentage [expr 100 * $usage / $total]
+        
+            if { $percentage > $g(DEVICE_MEMORY_ERROR) } {
+                set retVal 0
+                puts "ERROR - Device #$devInfo($key,deviceId) memory usage\
+                    is at $usage$usageUnit / $total$totalUnit ([format "%.2f" $percentage]%)\
+                    exceeding $g(DEVICE_MEMORY_ERROR)%"
+            } elseif { $percentage > $g(DEVICE_MEMORY_WARNING) } {
+                set retVal 0
+                puts "WARNING - Device #$devInfo($key,deviceId) memory usage\
+                    is at $usage$usageUnit / $total$totalUnit ([format "%.2f" $percentage]%)\
+                    exceeding $g(DEVICE_MEMORY_WARNING)%"
+            } else {
+                puts "OK - Device #$devInfo($key,deviceId) memory usage\
+                    is at $usage$usageUnit / $total$totalUnit ([format "%.2f" $percentage]%)"
+            }
+        } else {
+            set retVal 0
+            puts "ERROR - Unable to obtain memory information for deviceId $devInfo($key,deviceId)"
+        }
+        
+    }
+    
+    puts ""
+    
+    return $retVal
+    
+}
+
+
+
+proc SugguestConfiguration { _devInfo } {
+    upvar $_devInfo devInfo
+
+    global g
+    
+    set retVal 1
+    
+    puts "Compile-time configurable maximum number of Intel MIC co-processor on source code MICA-PE.c"
+    puts "\n>>> MICA-PE.c <<<
+...
+// -----------------------------
+// Compile-time Configurable #2
+// -----------------------------
+// Number of MIC card equipped in the machine.
+// User may set the numOfMICThread to 0 in mica-pe.ini to disable
+// a particular MIC card.
+#define NUM_MIC_EQUIPPED            [llength [array names devInfo *,KEY]]
+..."
+
+    puts "\nRun-time configurable number of threads on each Intel MIC co-processor mica-pe.ini"
+    
+    set numThread 0
+    set minCore 9999
+    foreach key [lsort -dictionary [array names devInfo "*,KEY"]] {
+        set key $devInfo($key)
+        set coreKey "$key,info,Number of Cores"
+        set numCore [expr $devInfo($coreKey) - 1]
+        if { $numCore < $minCore } {
+            set minCore $numCore
+        }
+    }
+    
+    puts "\n>>> mica-pe.ini <<<
+...
+\[MultipleThreading\]
+...
+# Number of MIC threads to be used by the MICA"
+
+    foreach key [lsort -dictionary [array names devInfo "*,KEY"]] {
+        set key $devInfo($key)
+        set coreKey "$key,info,Number of Cores"
+        
+        set tag "NumOfMICThreads_$devInfo($key,deviceId)"
+        if { $devInfo($key,deviceId) == 0 } {
+            set tag NumOfMICThreads
+        }
+        
+        puts "# Device #$devInfo($key,deviceId) has $devInfo($coreKey) cores."
+        puts "[format %-20s $tag] =\
+            [expr $g(DEVICE_THREAD_PER_CORE) * $minCore];"
+    }
+    puts "..."
+    
+    return $retVal
+}
+
+
+proc Main {} {
+    global g argv
+    
+    set retVal 1
+    set printAll 0
+
+    if { [lindex $argv 0] == "-all" } {
+        set printAll 1
+    }
+    
+    if { ![GetDeviceList devInfo] } {
+        set retVal 0
+    }
+    
+    if { ![PopulateDeviceInfo devInfo] } {
+        set retVal 0
+    }
+    
+    if { ![PopulateDeviceMemory devInfo] } {
+        set retVal 0
+    }
+    
+    if { ![PopulateDeviceTemperature devInfo] } {
+        set retVal 0
+    }
+    
+    puts "-----------------------------"
+    puts "MIC Aligner Hardware Analyser"
+    puts "-----------------------------"
+    
+    if { ![CheckTemperature devInfo] } {
+        set retVal 0
+    }
+    
+    if { ![CheckMemory devInfo] } {
+        set retVal 0
+    }
+    
+    if { $printAll } {
+        puts "-------------------------------------"
+        puts "Recommended MIC Aligner Configurations"
+        puts "-------------------------------------"
+        
+        if { ![SugguestConfiguration devInfo] } {
+            set retVal 0
+        }
+    }
+    
+    if { $retVal } {
+        return 0
+    } else {
+        return 1
+    }
+}
+
+Main

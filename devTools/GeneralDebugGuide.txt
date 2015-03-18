@@ -1,0 +1,49 @@
+#######################################################
+#
+# General Debug Guide for MICA
+#
+#######################################################
+
+1-  Pinpoint the part of software that generates the problem.
+    Offload error -> MICController core
+    Segmentation fault -> CPUController or MICA-PE-WriteThread Outputing
+
+2-  Pin down the read that caused the segmentation fault/offload error
+    There is no trick to this. A bit of diligence and dedication might help.
+    Denote the read as PROBLEM_READ.
+  
+
+#######################################################
+#
+# Debug Guide for MICA-PE-Write
+#
+#######################################################
+
+1-  Once you have pinpointed the problem could come from MICA-PE-Write
+    the debugging becomes easy. MICA-PE-Write does two things in nature
+    (i) Translating MIC results; (ii) Invokes CPU alignment core.
+    
+2-  Attempt to narrow down the debug scope by eliminating (ii) from the
+    equation. Re-run the problematic dataset with ONLY CPUController.
+    In this setting MICA will not be used and all reads will be passed into
+    flow (ii). If you could observe the same crash then the problem might
+    lie within (ii); Otherwise, the (i) flow is likely to be the source
+    of error.
+    
+3-  If the source of bug is determined to be (i), then find out the "Handle"
+    of PROBLEM_READ. The "handle" is defined as the stage of alignment
+    that eventually handled the reads. It helps describe the flow of the 
+    read in MICCont. and PE-WriteThread. For example, if the handle of a read
+    is MIC DeepDP. Then we can be certain that the read has gone through the 
+    following specific steps,
+    * MICController\SRA on Read
+    * MICController\SRA on Mate
+    * MICController\Brute-force Pairing Engine
+    * MICController\DefaultDP
+    * MICController\NewDefaultDP
+    * MICController\DeepDP
+    * MICA-PE-WriteThread\DeepDP Handler   <-- Problem
+    
+    You can find debug message for handle by turning on
+        DEBUG_MICA_PEWT_READ_HANDLING
+    debug flag on MICA-PE-WriteThread.h

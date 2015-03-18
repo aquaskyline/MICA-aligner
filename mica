@@ -1,0 +1,24 @@
+#!/bin/sh
+# /
+# The following needs to be setup before the mica-se software is invoked for
+# maximum performance.
+
+export MIC_ENV_PREFIX=MIC
+export MIC_KMP_AFFINITY=explicit,granularity=fine,proclist=[1-224:1]
+export MIC_1_KMP_AFFINITY=explicit,granularity=fine,proclist=[1-224:1]
+export MIC_2_KMP_AFFINITY=explicit,granularity=fine,proclist=[1-224:1]
+export MIC_OMP_NUM_THREADS=224
+export MIC_1_OMP_NUM_THREADS=224
+export MIC_2_OMP_NUM_THREADS=224
+export MIC_USE_2MB_BUFFERS=64K
+export OFFLOAD_INIT=on_start
+
+echo "Script invoked at `date`"
+
+if [ "$1" == "single" ]; then
+    ./mica-se "$@"
+else
+    ./mica-pe "$@"
+fi
+
+echo "Script ended at `date`"

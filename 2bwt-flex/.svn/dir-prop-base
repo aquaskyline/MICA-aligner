@@ -1,0 +1,12 @@
+K 13
+svn:externals
+V 73
+2bwt-lib svn+ssh://bio11/usr/local/svn/project/2bwt-lib/branches/mic-lib
+
+K 13
+svn:mergeinfo
+V 85
+/branches/alphabet8_64:207,209
+/branches/soap3-dp-library:250
+/latest:251-267,275,361
+END
